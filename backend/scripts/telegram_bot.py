@@ -1,23 +1,18 @@
 """
-ШАГ 5: Telegram-бот — уведомления о заказах > 50,000 ₸
-Запуск: python 4_telegram_bot.py
-
-Установка:
-    pip install requests
+Telegram Bot for order notifications
+Usage: python scripts/telegram_bot.py
 """
 
 import requests
 import time
-import json
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import config
+
 # ─── Настройки ─────────────────────────────────────────────────────────────────
-RETAILCRM_URL    = "https://narimandilovarov11.retailcrm.ru"
-RETAILCRM_API_KEY = "0maOkI6x4sko84a82gwiJ7LSkWLVw1Uq"
-
-TELEGRAM_TOKEN   = "8581023039:AAETaZUL7SwX5VlvxL9PfTLe8zmHzsGHmNQ"
-TELEGRAM_CHAT_ID = "894877615"
-
 THRESHOLD        = 50_000   # ₸ — порог уведомления
 CHECK_INTERVAL   = 60       # секунд между проверками
 LOOKBACK_MINUTES = 6        # смотрим заказы за последние N минут
@@ -28,14 +23,18 @@ notified_ids = set()  # храним ID уже отправленных зака
 
 def send_telegram(text: str):
     """Отправляем сообщение в Telegram"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": config.TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML"
     }
-    r = requests.post(url, json=payload, timeout=10)
-    return r.json()
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+        return r.json()
+    except Exception as e:
+        print(f"  ❌ Telegram error: {e}")
+        return {"ok": False}
 
 
 def calculate_summ(order: dict) -> float:
@@ -53,15 +52,19 @@ def calculate_summ(order: dict) -> float:
 def get_recent_orders() -> list:
     """Получаем заказы за последние LOOKBACK_MINUTES минут"""
     since = (datetime.utcnow() - timedelta(minutes=LOOKBACK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
-    url = f"{RETAILCRM_URL}/api/v5/orders"
+    url = f"{config.RETAILCRM_URL}/api/v5/orders"
     params = {
-        "apiKey": RETAILCRM_API_KEY,
+        "apiKey": config.RETAILCRM_API_KEY,
         "filter[createdAtFrom]": since,
         "limit": 100
     }
-    r = requests.get(url, params=params, timeout=15)
-    r.raise_for_status()
-    return r.json().get("orders", [])
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        return r.json().get("orders", [])
+    except Exception as e:
+        print(f"  ❌ Error getting orders: {e}")
+        return []
 
 
 def format_items(items: list) -> str:
@@ -126,15 +129,15 @@ def check_and_notify():
 
 def main():
     print("=" * 50)
-    print("🤖 Nova Telegram Bot запущен!")
+    print("🤖 RetailCRM Telegram Bot запущен!")
     print(f"   Порог уведомлений: {THRESHOLD:,} ₸")
     print(f"   Интервал проверки: {CHECK_INTERVAL} сек")
-    print(f"   RetailCRM: {RETAILCRM_URL}")
+    print(f"   RetailCRM: {config.RETAILCRM_URL}")
     print("=" * 50)
 
     # Стартовое сообщение
     send_telegram(
-        f"✅ <b>Nova Bot запущен!</b>\n"
+        f"✅ <b>RetailCRM Bot запущен!</b>\n"
         f"Слежу за заказами больше <b>{THRESHOLD:,} ₸</b>\n"
         f"Проверяю каждые {CHECK_INTERVAL} секунд 🚀"
     )
@@ -159,4 +162,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n👋 Bot stopped")
+        send_telegram("❌ Bot stopped")
+        sys.exit(0)
